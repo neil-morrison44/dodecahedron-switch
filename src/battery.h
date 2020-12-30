@@ -1,3 +1,2 @@
-bool isSmoothed();
 
 int getBatteryPercentage();

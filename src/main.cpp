@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include <secrets.h>
 #include <battery.h>
+#include <predict_value.h>
 
 #define VIBRATION_SWITCH_PIN 25
 #define VBAT_PIN A13
@@ -85,70 +86,33 @@ void setup(void)
 
   lsm6ds33.configInt1(false, false, true); // accelerometer DRDY on INT1
   lsm6ds33.configInt2(false, true, false); // gyro DRDY on INT2
+
+  setupModel();
 }
 
 void loop()
 {
   client.loop();
   int vibration = digitalRead(VIBRATION_SWITCH_PIN);
-  float measuredvbat = analogRead(VBAT_PIN);
-  measuredvbat *= 2;    // we divided by 2, so multiply back
-  measuredvbat *= 3.33; // 3.3v reference voltage
-  measuredvbat /= 4095; // convert to voltage
-
-  // 3.451 = 3.563
-  // 3.353 = 3.47
-
-  int batteryPercentage = map(measuredvbat * 100, 320, 420, 0, 100);
-
-  // if (vibration == 0)
-  // {
-  //   return;
-  // }
-
-  unsigned long uptime = millis();
 
   sensors_event_t accel;
   sensors_event_t gyro;
   sensors_event_t temp;
   lsm6ds33.getEvent(&accel, &gyro, &temp);
 
-  delay(100);
+  int batteryPercentage = getBatteryPercentage();
 
-  // serial plotter friendly format
+  sprintf(msg, "Battery: %d%%", batteryPercentage);
+  client.publish("test/battery", msg);
+  sprintf(msg, "%f,%f,%f,%f,%f,%f", accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, gyro.gyro.x, gyro.gyro.y, gyro.gyro.z);
+  client.publish("test/raw", msg);
 
-  Serial.print(temp.temperature);
-  Serial.print(",");
+  int prediction = predict(accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, gyro.gyro.x, gyro.gyro.y, gyro.gyro.z);
 
-  Serial.print(vibration);
-  Serial.print(",");
-  Serial.print(measuredvbat);
-  Serial.print("v,");
-  Serial.print(batteryPercentage);
-  Serial.print("%,");
+  sprintf(msg, "prediction: %d", prediction);
+  client.publish("test/predict", msg);
 
-  Serial.print(accel.acceleration.x);
-  Serial.print(",");
-  Serial.print(accel.acceleration.y);
-  Serial.print(",");
-  Serial.print(accel.acceleration.z);
-  Serial.print(",");
-
-  Serial.print(uptime);
-  Serial.print("ms,");
-
-  // Serial.print(gyro.gyro.x);
-  // Serial.print(",");
-  // Serial.print(gyro.gyro.y);
-  // Serial.print(",");
-  // Serial.print(gyro.gyro.z);
-  Serial.println();
   delay(5000);
-
-  int smoothedBat = getBatteryPercentage();
-
-  sprintf(msg, "Battery: %d%%, smoothed: %d%%, %fv - x: %f, y: %f, z: %f", batteryPercentage, smoothedBat, measuredvbat, accel.acceleration.x, accel.acceleration.y, accel.acceleration.z);
-  client.publish(MQTT_ROOT_TOPIC, msg);
 }
 
 // Number to Accel
