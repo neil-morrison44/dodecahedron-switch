@@ -19,12 +19,12 @@ int predict(float accel_x, float accel_y, float accel_z, float gyro_x, float gyr
   float prediction[12] = {0};
   ml.predict(input, prediction);
 
-  Serial.println("Predicted proba are: ");
+  // Serial.println("Predicted proba are: ");
 
-  for (int i = 0; i < NUMBER_OF_OUTPUTS; i++)
-  {
-    Serial.println(prediction[i]);
-  }
+  // for (int i = 0; i < NUMBER_OF_OUTPUTS; i++)
+  // {
+  //   Serial.println(prediction[i]);
+  // }
 
   int mostLikely = 0;
   for (int i = 0; i < NUMBER_OF_OUTPUTS; i++)

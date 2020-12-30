@@ -8,6 +8,10 @@
 
 #define VIBRATION_SWITCH_PIN 25
 #define VBAT_PIN A13
+#define WIFI_TIMEOUT_MS 30000
+
+#define TIME_TO_SLEEP 60 * 60 * 24
+#define uS_TO_S_FACTOR 1000000
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -17,6 +21,18 @@ char msg[MSG_BUFFER_SIZE];
 int value = 0;
 
 Adafruit_LSM6DS33 lsm6ds33;
+
+RTC_DATA_ATTR int bootCount = 0;
+
+bool wifiConnected = false;
+bool messagesSent = false;
+
+void connectToMQTT()
+{
+  Serial.println("connecting to MQTT");
+  client.setServer(MQTT_HOST, MQTT_PORT);
+  client.connect("dodec");
+}
 
 void WiFiEvent(WiFiEvent_t event)
 {
@@ -38,17 +54,20 @@ void WiFiEvent(WiFiEvent_t event)
     Serial.print("Wi-Fi signal level: ");
     Serial.println(WiFi.RSSI());
 
-    // connectToMqtt();
-    client.setServer(MQTT_HOST, MQTT_PORT);
-    client.connect("dodec");
-    client.publish(MQTT_ROOT_TOPIC, "connected");
+    wifiConnected = true;
+    connectToMQTT();
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
+    wifiConnected = false;
     Serial.println("Disconnected from Wi-Fi.");
-    // mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-    // wifiReconnectTimer.once(2, connectToWifi);
     break;
   }
+}
+
+void setupWakeEvents()
+{
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_25, HIGH);
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
 }
 
 void connectToWifi()
@@ -58,14 +77,86 @@ void connectToWifi()
   WiFi.begin(SSID, PASSWORD);
 }
 
+void sendMessage()
+{
+  Serial.println("Sending message");
+
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t temp;
+  lsm6ds33.getEvent(&accel, &gyro, &temp);
+
+  int prediction = predict(accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, gyro.gyro.x, gyro.gyro.y, gyro.gyro.z);
+  sprintf(msg, "prediction: %d", prediction);
+  client.publish("test/predict", msg);
+  // take readings
+  // make prediction
+
+  // set all (other) switches to off
+  // set predicted switch to on
+}
+
+void sendBatteryMessage()
+{
+  Serial.println("Sending battery message");
+  int batteryPercentage = getBatteryPercentage();
+
+  sprintf(msg, "Battery: %d%%", batteryPercentage);
+  client.publish("test/battery", msg);
+}
+
+void disconnectEverything()
+{
+  Serial.println("Disconnecting Everything...");
+  client.disconnect();
+  delay(20);
+  WiFi.disconnect();
+  delay(80);
+}
+
+void gotoSleep()
+{
+  client.loop();
+  Serial.println("Going to sleep...");
+  disconnectEverything();
+  esp_deep_sleep_start();
+}
+
+void onWake()
+{
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch (wakeup_reason)
+  {
+  case ESP_SLEEP_WAKEUP_EXT0:
+    Serial.println("Wakeup caused by external signal using RTC_IO");
+    sendMessage();
+    sendBatteryMessage();
+    gotoSleep();
+    break;
+  case ESP_SLEEP_WAKEUP_TIMER:
+    Serial.println("Wakeup caused by timer");
+    sendBatteryMessage();
+    gotoSleep();
+    break;
+  default:
+    Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+    delay(1000);
+    gotoSleep();
+    break;
+  }
+}
+
 void setup(void)
 {
 
-  pinMode(VIBRATION_SWITCH_PIN, INPUT);
+  // pinMode(VIBRATION_SWITCH_PIN, INPUT);
   pinMode(VBAT_PIN, INPUT);
 
+  setupWakeEvents();
+
   Serial.begin(9600);
-  delay(1000);
+  delay(100);
   while (!Serial)
     delay(10); // will pause Zero, Leonardo, etc until serial console opens
 
@@ -76,10 +167,7 @@ void setup(void)
   if (!lsm6ds33.begin_I2C())
   {
     Serial.println("Failed to find LSM6DS33 chip");
-    while (1)
-    {
-      delay(10);
-    }
+    gotoSleep();
   }
 
   Serial.println("LSM6DS33 Found!");
@@ -88,37 +176,24 @@ void setup(void)
   lsm6ds33.configInt2(false, true, false); // gyro DRDY on INT2
 
   setupModel();
+
+  ++bootCount;
+  Serial.println("Boot number: " + String(bootCount));
 }
 
 void loop()
 {
+  if ((millis() > WIFI_TIMEOUT_MS) && !client.connected())
+  {
+    Serial.println("WiFI connection timedout");
+    gotoSleep();
+    return;
+  }
+
   client.loop();
-  int vibration = digitalRead(VIBRATION_SWITCH_PIN);
 
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t temp;
-  lsm6ds33.getEvent(&accel, &gyro, &temp);
-
-  int batteryPercentage = getBatteryPercentage();
-
-  sprintf(msg, "Battery: %d%%", batteryPercentage);
-  client.publish("test/battery", msg);
-  sprintf(msg, "%f,%f,%f,%f,%f,%f", accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, gyro.gyro.x, gyro.gyro.y, gyro.gyro.z);
-  client.publish("test/raw", msg);
-
-  int prediction = predict(accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, gyro.gyro.x, gyro.gyro.y, gyro.gyro.z);
-
-  sprintf(msg, "prediction: %d", prediction);
-  client.publish("test/predict", msg);
-
-  delay(5000);
+  if (wifiConnected && client.connected())
+  {
+    onWake();
+  }
 }
-
-// Number to Accel
-// 0 : -9.57,0.23,0.39
-// 1 : -4.09,-9.16,-0.50
-// 2 : -4.41,-1.99,-8.27
-// 3 : -3.63,7.83,-4.06
-// 4 : -3.95,6.73,6.10
-// 5 : -4.25,-3.32,8.46
