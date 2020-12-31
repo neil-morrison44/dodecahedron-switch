@@ -1,7 +1,7 @@
 # dodecahedron-switch
 Sort of a (probably more expensive) (less good) DIY version of [the nanoleaf remote](https://www.youtube.com/watch?v=FFnLSsW_xBE)
 
-| | |
+| Setting Homekit Scenes | Charging |
 | --- | --- |
 |![turning on](./readme_assets/on.gif) ![turning off](./readme_assets/off.gif) | ![Charging](./readme_assets/charging.jpeg) |
 ## BOM
