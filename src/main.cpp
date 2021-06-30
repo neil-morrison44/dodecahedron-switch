@@ -3,11 +3,11 @@
 #include <Adafruit_LSM6DS33.h>
 #include <PubSubClient.h>
 #include <secrets.h>
-#include <battery.h>
 #include <predict_value.h>
+#include <TinyPICO.h>
 
 #define VIBRATION_SWITCH_PIN 25
-#define VBAT_PIN A13
+#define IMU_POWER_PIN 27
 #define WIFI_TIMEOUT_MS 30000
 
 #define TIME_TO_SLEEP 60 * 60 * 24
@@ -19,6 +19,8 @@ unsigned long lastMsg = 0;
 #define MSG_BUFFER_SIZE (128)
 char msg[MSG_BUFFER_SIZE];
 int value = 0;
+
+TinyPICO tp = TinyPICO();
 
 Adafruit_LSM6DS33 lsm6ds33;
 
@@ -127,7 +129,7 @@ void sendMessage()
 void sendBatteryMessage()
 {
   Serial.println("Sending battery message");
-  int batteryPercentage = getBatteryPercentage();
+  int batteryPercentage = map(tp.GetBatteryVoltage() * 1000, 3200, 4200, 0, 100);
 
   // sprintf(msg, "Battery: %d%%", batteryPercentage);
   // client.publish("test/battery", msg);
@@ -145,6 +147,8 @@ void sendBatteryMessage()
 void disconnectEverything()
 {
   Serial.println("Disconnecting Everything...");
+  digitalWrite(IMU_POWER_PIN, LOW);
+  tp.DotStar_SetPower(false);
   client.disconnect();
   delay(20);
   WiFi.disconnect();
@@ -177,6 +181,7 @@ void onWake()
     gotoSleep();
     break;
   default:
+    Serial.printf("Battery Voltage: %f\n", tp.GetBatteryVoltage());
     Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
     registerDevice();
     delay(1000);
@@ -189,7 +194,9 @@ void setup(void)
 {
 
   // pinMode(VIBRATION_SWITCH_PIN, INPUT);
-  pinMode(VBAT_PIN, INPUT);
+
+  pinMode(IMU_POWER_PIN, OUTPUT);
+  digitalWrite(IMU_POWER_PIN, HIGH);
 
   setupWakeEvents();
 
